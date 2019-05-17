@@ -2,69 +2,70 @@
 Python package to deal with raw sql queries in projects.
 
 
-We are trying to use dict instead of tuple of values, so that we don't
-need to worry about param positioning. This really helps in building
-dynamic queries you don't need to check for the param positioning.
+Django raw query is a simple wrapper on top of django connection framework, to deal with named parameters in raw sql formatting, few db drivers support this and some don't.
 
-I.e:
-    In general normal queries will be written like below..
+To execute a raw query we use string formatting in serverside, we send the equal number of parameters along with the query.
 
-            SQL = '''
-                SELECT
-                   COLUMN1,
-                   COLUMN2,
-                   %s AS TEMP_COLUMN
-                FROM table as t
-                WHERE
-                    t.COLUMN3 = %s AND
-                    t.COLUMN_N in %s
-            '''
-            params = ('TEMP COLUMN VALUE', 'COLUMNS3', (1, 2, 3))
+    SELECT
+      IF(create_date = %s, val_one, val_two) AS select_one,
+      IF(condition_3=%s, val_three, IF(condition_3=%s, val_four, NULL)) AS select_two
+    FROM table_name
+    WHERE
+      create_date BETWEEN %s AND %s
+      condition_2 = %s AND
+      condition_3 IN (%s, %s)
 
-And the above query gets passed to the cursor like below..
+In a situation as defined above, we endup defining many duplicate values. If we name the params...
 
-            couror.execute(SQL, params)
+    SELECT
+      IF(create_date = %s(start_date), val_one, val_two) AS select_one,
+      IF(condition_3=%s(value_one), val_three, IF(condition_3=%s(value_two), val_four, NULL)) AS select_two
+    FROM table_name
+    WHERE
+      create_date BETWEEN %s(start_date) AND %s(end_date)
+      condition_2 = %s(condition_two_value) AND
+      condition_3 IN (%s(value_one), %s(value_two))
 
-            This will protect from SQL injection attacks, but if have to build a
-            dynamic query it's a becomes a problem to create a final params
-            tuple with exact positioning.
+The params are (`start_date`, `value_one`, `start_date`, `end_date`, `condition_two_value`, `value_one`, `value_two`). Here we've duplicate values present in the params list, if we scale this up and your query might have 300 params and 100 of them are duplicate, it's still easy to form the params list but unnecessary effort and not readable.
 
-        Just to overcome the above problem, we've introduced this method in
-        RawQuery to automate the above param positioning part.
+To solve the above situation, we just pass the `kwargs` instead `positional args`, will and we manage them internally to convert back to positional.
 
-        I.e:
-            >>> from ... import RawQuery
-            >>> SQL =
-            '''
-                  SELECT
-                    COLUMN1,
-                    COLUMN2,
-                    {temp_value} AS TEMP_COLUMN
-                  FROM table as t
-                  WHERE
-                    t.COLUMN3 = {col3_value} AND
-                    t.COLUMN_N in {coln_value_list}
-                    '''
-            >>> params = {'temp_value': 'Temp Value', 'col3_value': 3,
-                          'coln_value_list': (1, 2, 3)}
+    SELECT
+      IF(create_date = {start_date}, val_one, val_two) AS select_one,
+      IF(condition_3={cond_three_value_one}, val_three, IF(condition_3={cond_three_value_two}, val_four, NULL)) AS select_two
+    FROM table_name
+    WHERE
+      create_date BETWEEN {start_date} AND {end_date}
+      condition_2 = {condition_two_value} AND
+      condition_3 IN ({cond_three_value_one}, {cond_three_value_two})
 
-            Then try with "RawQuery"...
+Django raw query uses python formatting style to name the params, it just takes a alpha numerics with just `_` allowed.
 
-            >>> query = RawQuery(SQL, params=params)
-            >>> quer, para = query._replace_dict_params()
-            >>> print quer
+For the above query the params part would be...
 
-              SELECT
-                COLUMN1,
-                COLUMN2,
-                %s AS TEMP_COLUMN
-              FROM table as t
-              WHERE
-                t.COLUMN3 = %s AND
-                t.COLUMN_N in %s
+    params = {
+        'start_date': '2019-01-01',
+        'end_date': '2019-04-30',
+        'condition_two_value': 'condition_two_value ewye33',
+        'cond_three_value_one': 'cond_three_value_one 3cewwcw24',
+        'cond_three_value_two': 'cond_three_value_two cbehw24'
+    }
 
-            >>> print para
-            ['Temp Value', 3, (1, 2, 3)]
+What Django raw query does here is, it checks for the position of each name in the query and make a list corresponding to it and convert this completely to a positional param query and send it to the server.
 
-        The above dict format of attributes gets converted into a tuple of
-        values.
+It converts the query back to positional based params..
+
+    SELECT
+      IF(create_date = %s, val_one, val_two) AS select_one,
+      IF(condition_3=%s, val_three, IF(condition_3=%s, val_four, NULL)) AS select_two
+    FROM table_name
+    WHERE
+      create_date BETWEEN %s AND %s
+      condition_2 = %s AND
+      condition_3 IN (%s, %s)
+
+And the params will be converted as a list with positiona of the parameter maintained.
+
+    `('2019-01-01', 'condition_two_value ewye33', '2019-01-01', '2019-04-30', 'condition_two_value ewye33', 'cond_three_value_one 3cewwcw24', 'cond_three_value_two cbehw24')`
+
+So, process happens irrespective of `db` that we use.
