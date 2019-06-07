@@ -18,7 +18,7 @@ To execute a raw query we use string formatting in serverside, we send the equal
 In a situation as defined above, we endup defining many duplicate values. If we name the params...
 
     SELECT
-      IF(create_date = %s(start_date), val_one, val_two) AS select_one,
+      IF(create_date=%s(start_date), val_one, val_two) AS select_one,
       IF(condition_3=%s(value_one), val_three, IF(condition_3=%s(value_two), val_four, NULL)) AS select_two
     FROM table_name
     WHERE
